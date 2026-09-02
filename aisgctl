@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""aisgctl — native Linux controller for AISG v2.0 RET devices.
+
+Works with any FTDI-based AISG modem (e.g. ATC200-LITE-USB, which enumerates
+as a standard FTDI serial port on Linux via ftdi_sio).
+
+Examples:
+    aisgctl -p /dev/ttyUSB0 scan
+    aisgctl -p /dev/ttyUSB0 info
+    aisgctl -p /dev/ttyUSB0 tilt            # read current tilt
+    aisgctl -p /dev/ttyUSB0 tilt 4.5        # set tilt to 4.5 degrees
+    aisgctl -p /dev/ttyUSB0 calibrate
+    aisgctl -p /dev/ttyUSB0 alarms
+"""
+
+import argparse
+import sys
+
+sys.path.insert(0, __file__.rsplit("/", 1)[0])
+
+from aisg import AisgLink, AisgError, Ret
+
+
+def open_and_setup(args):
+    link = AisgLink(args.port, baud=args.baud, dtr=not args.no_dtr,
+                    debug=args.debug)
+    devices = link.scan()
+    if devices:
+        for i, dev in enumerate(devices):
+            link.assign_address(dev, args.address + i)
+        return link, devices
+    # Nothing answered the broadcast scan. That is also what a bus whose
+    # devices were addressed by an earlier run looks like, since an addressed
+    # secondary stops matching the scan (TS 25.462 4.8.4) -- so before giving
+    # up, poll the addresses we would have handed out.
+    devices = link.scan_assigned(args.address, args.probe)
+    if not devices:
+        raise AisgError("no AISG devices found on the bus "
+                        "(check power feed and RS-485 wiring)")
+    return link, devices
+
+
+def pick_device(link, devices, args):
+    dev = devices[args.index]
+    link.connect(dev.address)
+    return Ret(link, dev.address, antenna=args.antenna)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter,
+                                 epilog="\n".join(__doc__.splitlines()[1:]))
+    ap.add_argument("-p", "--port", default="/dev/ttyUSB0")
+    ap.add_argument("-b", "--baud", type=int, default=9600)
+    ap.add_argument("--address", type=int, default=0x01,
+                    help="first HDLC address to assign (default 1)")
+    ap.add_argument("-i", "--index", type=int, default=0,
+                    help="device index when several are on the bus")
+    ap.add_argument("--probe", type=int, default=8, metavar="N",
+                    help="addresses to poll for already-addressed devices "
+                         "when the scan comes up empty (default 8)")
+    ap.add_argument("-a", "--antenna", type=int, default=None,
+                    help="antenna number for multi-antenna (MRET) units")
+    ap.add_argument("--no-dtr", action="store_true",
+                    help="do not assert DTR on open")
+    ap.add_argument("-d", "--debug", action="store_true",
+                    help="hex-dump all frames")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("scan", help="list devices on the AISG bus")
+    sub.add_parser("info", help="product/serial/hw/sw of the device")
+    p_tilt = sub.add_parser("tilt", help="get, or set, electrical tilt")
+    p_tilt.add_argument("degrees", nargs="?", type=float)
+    sub.add_parser("calibrate", help="run actuator calibration")
+    sub.add_parser("alarms", help="read active alarm status")
+    sub.add_parser("clear-alarms", help="clear active alarms")
+    sub.add_parser("self-test", help="run device self test")
+    sub.add_parser("reset", help="reset device software")
+    args = ap.parse_args()
+
+    try:
+        link, devices = open_and_setup(args)
+    except AisgError as e:
+        sys.exit(f"error: {e}")
+
+    try:
+        if args.cmd == "scan":
+            for dev in devices:
+                print(dev)
+                if not dev.unique_id:
+                    # recovered by address probe: identity lives a layer up
+                    link.connect(dev.address)
+                    info = Ret(link, dev.address).get_information()
+                    print(f"    (addressed by an earlier session: "
+                          f"{info['product_number']} "
+                          f"sn {info['serial_number']})")
+            return
+        ret = pick_device(link, devices, args)
+        if args.cmd == "info":
+            for k, v in ret.get_information().items():
+                print(f"{k:18} {v}")
+        elif args.cmd == "tilt":
+            if args.degrees is None:
+                print(f"{ret.get_tilt():.1f}")
+            else:
+                ret.set_tilt(args.degrees)
+                print(f"tilt set, now {ret.get_tilt():.1f}")
+        elif args.cmd == "calibrate":
+            print("calibrating (can take a minute)...")
+            ret.calibrate()
+            print("done")
+        elif args.cmd == "alarms":
+            alarms = ret.get_alarm_status()
+            print("\n".join(alarms) if alarms else "no active alarms")
+        elif args.cmd == "clear-alarms":
+            ret.clear_alarms()
+        elif args.cmd == "self-test":
+            ret.self_test()
+            print("self test OK")
+        elif args.cmd == "reset":
+            ret.reset()
+    except AisgError as e:
+        sys.exit(f"error: {e}")
+    finally:
+        link.close()
+
+
+if __name__ == "__main__":
+    main()
