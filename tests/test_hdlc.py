@@ -4,7 +4,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from aisg import hdlc
+from openaisg import hdlc
 
 
 def test_fcs_reference_vector():

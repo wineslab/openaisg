@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""aisgd -- HTTP/WebSocket control for an AISG v2.0 RET actuator.
+"""openaisg -- HTTP/WebSocket control for an AISG v2.0 RET actuator.
 
 One process owns /dev/ttyUSB0 (the device is exclusive: allocatable=1) and
 exposes the antenna's status, controls and alarms so a tilt sweep or a
@@ -46,8 +46,8 @@ import sys
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
-from aisg.link import AisgError, AisgTimeout, LinkReset, PortBusy, PortLost
-from aisg.session import (COMMAND_TIMEOUTS, DEFAULT_COMMAND_TIMEOUT,
+from openaisg.link import AisgError, AisgTimeout, LinkReset, PortBusy, PortLost
+from openaisg.session import (COMMAND_TIMEOUTS, DEFAULT_COMMAND_TIMEOUT,
                           MonitorMode, PRIORITY_CONTROL, PRIORITY_USER,
                           SerialWorker, SessionError, WRITE_COMMANDS)
 from api.events import EventBus, WorkerBridge
@@ -57,7 +57,7 @@ logging.basicConfig(
     level=logging.DEBUG if os.environ.get("AISG_DEBUG") == "1" else logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
-logger = logging.getLogger("aisg.server")
+logger = logging.getLogger("openaisg.api")
 
 PORT = os.environ.get("AISG_PORT", "/dev/ttyUSB0")
 BAUD = int(os.environ.get("AISG_BAUD", "9600"))
@@ -93,11 +93,11 @@ async def lifespan(app: FastAPI):
         probe_count=PROBE_COUNT, emit=bridge.emit, debug=DEBUG,
     )
     worker.start()
-    logger.info("aisgd up: port=%s monitor=%s", PORT, MONITOR)
+    logger.info("openaisg up: port=%s monitor=%s", PORT, MONITOR)
     try:
         yield
     finally:
-        logger.info("aisgd shutting down; releasing the AISG link")
+        logger.info("openaisg shutting down; releasing the AISG link")
         worker.stop()
         # Give an in-flight operation a chance to finish and the link to be
         # closed cleanly, or the device is left holding an address.
@@ -105,7 +105,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="aisgd",
+    title="openaisg",
     description=__doc__,
     version="1.0.0",
     lifespan=lifespan,

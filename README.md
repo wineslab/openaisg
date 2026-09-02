@@ -1,4 +1,4 @@
-# aisg-ret — native Linux AISG v2.0 RET control
+# openaisg — native Linux AISG v2.0 RET control
 
 A from-scratch replacement for ATC Lite's control path, implementing the open
 AISG v2.0 protocol (3GPP TS 25.462 transport + TS 25.466 RETAP) directly over
@@ -6,28 +6,32 @@ a Linux serial port — plus an HTTP/WebSocket service and a web UI, so antenna
 downtilt is a controllable variable in an experiment rather than a Windows GUI
 someone has to click.
 
+The name: AISG is an **open** published standard (3GPP TS 25.462 / 25.466),
+but the tooling around it is vendor Windows software. This is an open
+implementation of the open spec — which is what makes it scriptable.
+
 Runs against an **Alpha Wireless AW3161-E-F-V2** antenna with a
 **RET21-AS155D** actuator, via an **ATC200-LITE-USB** modem (FTDI,
 `/dev/ttyUSB0` through `ftdi_sio`; no D2XX driver needed). Runs on a plain
 Linux host, or on OpenShift via `deploy/`.
 
 ```
-                    ui/            index.html      ── browser
-                     │
-                    api/           FastAPI + WS    ── curl / scripts
-                     │
-       aisg/session.py             one owner of the port, one queue
-                     │
-   aisg/link.py, hdlc.py, retap.py HDLC · XID scan · RETAP
-                     │
-                /dev/ttyUSB0       RS-485, 9600 8N1, half-duplex
+                        ui/        index.html      ── browser
+                         │
+                        api/       FastAPI + WS    ── curl / scripts
+                         │
+       openaisg/session.py         one owner of the port, one queue
+                         │
+   openaisg/{link,hdlc,retap}.py   HDLC · XID scan · RETAP
+                         │
+              /dev/ttyUSB0         RS-485, 9600 8N1, half-duplex
 ```
 
 ## Layout
 
 | Path | What lives there |
 |---|---|
-| `aisg/` | the protocol library — framing, link layer, RETAP, session |
+| `openaisg/` | the protocol library — framing, link layer, RETAP, session |
 | `api/` | the HTTP/WebSocket service (`app.py`, `events.py`, `jobs.py`) |
 | `ui/` | single-page test UI, served by the API at `/` |
 | `cli/` | `aisgctl`, the one-shot command-line tool |
@@ -36,7 +40,7 @@ Linux host, or on OpenShift via `deploy/`.
 | `tests/` | 63 tests, no hardware required |
 | `docs/` | protocol, hardware findings, deployment, validation |
 
-Inside `aisg/`:
+Inside `openaisg/`:
 
 - `hdlc.py` — HDLC async framing, CRC-16/X.25 FCS, XID parameter coding, plus
   `Deframer` (incremental and resynchronising) and `kind()` (control-field

@@ -1,4 +1,8 @@
-# aisgd -- AISG RET control API on devkit06sno.
+# openaisg -- the AISG RET control service.
+#
+# The Kubernetes objects are named `aisgd` (the daemon), which is what fixes
+# the route host. Renaming them changes the URL, so they were deliberately
+# left alone when the project was renamed to openaisg.
 #
 #   oc apply -f deploy/aisgd.yaml
 #   oc get route aisgd -n aisg -o jsonpath='{.spec.host}{"\n"}'

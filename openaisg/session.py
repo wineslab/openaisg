@@ -40,7 +40,7 @@ from .link import (ACCEPT, INDICATION, UNEXPECTED, AisgError, AisgLink,
 from . import retap
 from .retap import Ret
 
-logger = logging.getLogger("aisg.session")
+logger = logging.getLogger("openaisg.session")
 
 
 class LinkState(str, enum.Enum):

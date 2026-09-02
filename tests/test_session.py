@@ -8,9 +8,9 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from aisg import hdlc, link, retap, session
-from aisg.link import ACCEPT, INDICATION, UNEXPECTED
-from aisg.session import (AlarmTracker, LinkState, MonitorMode, RetapRouter,
+from openaisg import hdlc, link, retap, session
+from openaisg.link import ACCEPT, INDICATION, UNEXPECTED
+from openaisg.session import (AlarmTracker, LinkState, MonitorMode, RetapRouter,
                           SerialTransport, SerialWorker, SessionError)
 from tests.fake_secondary import FakeSerial, Secondary
 from tests.test_exchange import make_link

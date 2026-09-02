@@ -120,7 +120,7 @@ class AisgLink:
         except serial.SerialException as e:
             if e.errno in (errno.EWOULDBLOCK, errno.EAGAIN, errno.EACCES):
                 raise PortBusy(
-                    f"{port} is locked by another process (the aisgd service "
+                    f"{port} is locked by another process (the openaisg service "
                     f"holds it while its AISG session is up)"
                 ) from e
             if e.errno in (errno.EIO, errno.EPROTO, errno.ENODEV, errno.ENXIO):

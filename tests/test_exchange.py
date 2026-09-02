@@ -12,8 +12,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from aisg import hdlc, link
-from aisg.link import ACCEPT, INDICATION, UNEXPECTED, AisgTimeout, LinkReset
+from openaisg import hdlc, link
+from openaisg.link import ACCEPT, INDICATION, UNEXPECTED, AisgTimeout, LinkReset
 from tests.fake_secondary import FakeSerial, Secondary
 
 

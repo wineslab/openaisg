@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from aisg import hdlc
+from openaisg import hdlc
 
 
 def frame(addr, ctrl, payload=b""):

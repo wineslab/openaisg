@@ -20,7 +20,7 @@ try:
 except ImportError:
     sys.exit("pyserial not installed: pip install pyserial")
 
-from aisg import hdlc
+from openaisg import hdlc
 
 print(f"[1] opening {port} @ 9600 8N1 ...")
 try:

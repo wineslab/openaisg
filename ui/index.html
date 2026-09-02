@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aisgd — AISG RET control</title>
+<title>openaisg — AISG RET control</title>
 <style>
   /* Roles, not raw hex, so light/dark swap in one place. */
   :root {
@@ -189,7 +189,7 @@
 <div class="wrap">
 
 <header>
-  <h1>aisgd</h1>
+  <h1>openaisg</h1>
   <span class="host" id="host"></span>
   <span class="spacer"></span>
   <span class="status s-idle" id="ws-status">
@@ -325,7 +325,7 @@ let logLines = 0;
 let controlTouched = false;   // don't overwrite the operator's input
 
 // --- theme ---------------------------------------------------------------
-const savedTheme = localStorage.getItem("aisgd-theme") || "";
+const savedTheme = localStorage.getItem("openaisg-theme") || "";
 document.documentElement.dataset.theme = savedTheme;
 const syncThemeButton = () => {
   const dark = document.documentElement.dataset.theme === "dark" ||
@@ -339,7 +339,7 @@ $("theme").onclick = () => {
      matchMedia("(prefers-color-scheme: dark)").matches);
   const next = dark ? "light" : "dark";
   document.documentElement.dataset.theme = next;
-  localStorage.setItem("aisgd-theme", next);
+  localStorage.setItem("openaisg-theme", next);
   syncThemeButton();
 };
 syncThemeButton();

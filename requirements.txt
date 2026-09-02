@@ -1,4 +1,4 @@
-# aisgd service dependencies. >= floors, no lockfile, matching the other
+# openaisg service dependencies. >= floors, no lockfile, matching the other
 # services in this workspace.
 fastapi>=0.110
 uvicorn>=0.29

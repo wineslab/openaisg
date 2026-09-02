@@ -95,7 +95,7 @@ and the service cannot silently interleave HDLC onto the same half-duplex bus.
 Contention becomes an error, not corruption:
 
 ```
-error: /dev/ttyUSB0 is locked by another process (the aisgd service holds it
+error: /dev/ttyUSB0 is locked by another process (the openaisg service holds it
        while its AISG session is up)
 ```
 

@@ -1,6 +1,6 @@
 # AISG v2.0 on the wire
 
-Three layers, two specs. Everything here is implemented in `aisg/`, and every
+Three layers, two specs. Everything here is implemented in `openaisg/`, and every
 byte sequence shown was captured from the RET21-AS155D on the bench.
 
 ## Physical
@@ -17,7 +17,7 @@ budget while bytes keep flowing and refuses to return mid-frame; see
 `hdlc.Deframer.partial`. Getting this wrong produced a real FRMR — the wire
 trace is in `docs/hardware.md`.
 
-## Data link — HDLC, 3GPP TS 25.462 (`aisg/hdlc.py`)
+## Data link — HDLC, 3GPP TS 25.462 (`openaisg/hdlc.py`)
 
 ```
 0x7E | ADDR | CTRL | payload | FCS(2, little-endian) | 0x7E
@@ -92,7 +92,7 @@ This is also why `hdlc.parse_frames()` is kept alongside `hdlc.Deframer`: the
 scan path *needs* the exception, while a long-lived session needs a deframer
 that resynchronises instead of raising.
 
-## Application — RETAP, 3GPP TS 25.466 (`aisg/retap.py`)
+## Application — RETAP, 3GPP TS 25.466 (`openaisg/retap.py`)
 
 Layer-7 messages ride inside I-frames:
 

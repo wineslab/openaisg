@@ -15,7 +15,7 @@ import itertools
 import logging
 import time
 
-logger = logging.getLogger("aisg.state")
+logger = logging.getLogger("openaisg.events")
 
 QUEUE_DEPTH = 256
 REPLAY = 500

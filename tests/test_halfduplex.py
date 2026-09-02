@@ -12,7 +12,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from aisg import hdlc, link
+from openaisg import hdlc, link
 from tests.fake_secondary import Secondary, default_responses
 from tests.test_exchange import make_link
 

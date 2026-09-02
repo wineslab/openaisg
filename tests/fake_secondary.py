@@ -9,7 +9,7 @@ an AlarmIndication arriving in the middle of a transaction.
 
 import time
 
-from aisg import hdlc
+from openaisg import hdlc
 
 
 class FakeSerial:
@@ -72,8 +72,8 @@ def _lp(s: str) -> bytes:
 
 def default_responses() -> dict:
     """A plausible RET21-AS155D, matching the real device's answers."""
-    from aisg import retap as _r
-    info = (_lp("RET21-AS155D") + _lp("21707700215001131")
+    from openaisg import retap as _r
+    info = (_lp("RET21-AS155D") + _lp("12345678901230020")
             + _lp("2.00") + _lp("2.6.6"))
     return {
         _r.GET_INFORMATION: retap_response(_r.GET_INFORMATION, info),
