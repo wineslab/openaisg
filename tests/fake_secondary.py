@@ -175,7 +175,11 @@ class Secondary:
             self._owed_rr = self.rr_before_response
             return self._next()
 
-        # Supervisory frame from the primary: a poll.
+        # Supervisory frame from the primary. In NRM the secondary may only
+        # transmit when the poll bit invites it -- the final ack of an
+        # exchange clears P precisely so nothing more comes back.
+        if not ctrl & hdlc.PF:
+            return []
         self.polls_seen += 1
         return self._next()
 

@@ -108,6 +108,20 @@ class Deframer:
         self.fcs_errors = 0
         self.overruns = 0
 
+    @property
+    def partial(self) -> bool:
+        """True when a frame is part-way through arriving.
+
+        The caller must not transmit while this holds: the bus is
+        half-duplex. Trailing flag bytes do not count -- a closing flag is
+        deliberately left in the buffer so back-to-back frames can share it.
+        """
+        buf = self._buf
+        i = 0
+        while i < len(buf) and buf[i] == FLAG:
+            i += 1
+        return i < len(buf)
+
     def feed(self, data: bytes) -> list:
         """Consume bytes, return [(addr, ctrl, payload), ...] for whole frames."""
         self._buf += data

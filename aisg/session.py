@@ -527,6 +527,7 @@ class SerialWorker(threading.Thread):
             self._arm_backoff()
             return
 
+        self._clear_stale_links()
         self._set_state(LinkState.DISCOVERING)
         try:
             addr = self._discover()
@@ -551,16 +552,38 @@ class SerialWorker(threading.Thread):
             self._arm_backoff()
             return
         self.address = addr
-        self._backoff = 1.0
         self._want_link = False
-        self._on_connected()
+        if not self._on_connected():
+            # The link died during entry actions; going to CONNECTED here
+            # would advertise a session that is already gone.
+            self._fail_link(self._last_error or "entry actions failed")
+            return
+        self._backoff = 1.0
         self._set_state(LinkState.CONNECTED)
 
+    def _clear_stale_links(self):
+        """DISC anything that might still think it has a link with us.
+
+        The CLI never disconnects -- it just closes the port -- so a device
+        can be left holding an address and a half-open link. Starting from
+        DISC makes the opening state the same however the previous session
+        ended, and since DISC also makes this RET drop its address, the plain
+        broadcast scan then finds it again, which is the best-tested path.
+
+        Cheap insurance rather than a fix for anything: the FRMR seen while
+        building this turned out to be a half-duplex bug in the read pump,
+        not stale device state.
+        """
+        for addr in {a for a in (self.address, self.first_address)
+                     if a is not None}:
+            try:
+                self.link.disconnect(addr, timeout=0.3)
+            except AisgError:
+                pass
+        self.address = None
+
     def _discover(self) -> int | None:
-        """Tier 0 cached address, then broadcast scan, then address probe."""
-        if self.address is not None:
-            if self.link.probe_address(self.address, disconnect=True):
-                return self.address
+        """Broadcast scan first, then probe for an already-addressed device."""
         devices = self.link.scan()
         if devices:
             for i, dev in enumerate(devices):
@@ -579,10 +602,13 @@ class SerialWorker(threading.Thread):
             return found[0].address
         return None
 
-    def _on_connected(self):
+    def _on_connected(self) -> bool:
         """Entry actions. Order matters: identity, then subscribe, then a
         silent alarm baseline so a reconnect does not replay old alarms as
-        fresh events."""
+        fresh events.
+
+        False means the link is unusable and the caller must not advertise it.
+        """
         transport = SerialTransport(self.link, on_indication=self._queue_indication)
         ret = Ret(transport, self.address)
         try:
@@ -593,8 +619,15 @@ class SerialWorker(threading.Thread):
             self.alarm_mode = self._subscribe(ret)
             self.alarms.snapshot(ret.get_alarm_status(), emit=False)
             self.tilt = ret.get_tilt()
+        except LinkReset as e:
+            self._last_error = str(e)
+            logger.warning("link reset during entry actions: %s", e)
+            return False
         except AisgError as e:
+            # A single procedure the device dislikes (an unsupported field,
+            # say) is not a reason to refuse the whole session.
             logger.warning("entry actions incomplete: %s", e)
+        return True
 
     def _subscribe(self, ret: Ret) -> str:
         """AlarmSubscribe is per-link and must be redone after every SNRM.

@@ -261,8 +261,8 @@ class AisgLink:
                 return
         raise AisgError(f"no UA to SNRM from address 0x{addr:02X}")
 
-    def disconnect(self, addr: int):
-        self._command(addr, hdlc.CTRL_DISC | hdlc.PF)
+    def disconnect(self, addr: int, timeout: float | None = None):
+        self._command(addr, hdlc.CTRL_DISC | hdlc.PF, timeout=timeout)
         p = self._peer(addr)
         p.reset()
         p.connected = False
@@ -318,21 +318,41 @@ class AisgLink:
         can be lost."""
         return hdlc.build_frame(addr, 0x01 | (vr << 5) | (hdlc.PF if poll else 0))
 
-    def _read_frames(self, budget: float) -> list:
+    def _read_frames(self, budget: float, idle_gap: float = 0.05,
+                     hard_cap: float = 3.0) -> list:
         """Pump: read for up to `budget` seconds, return whole frames.
 
         Never flushes the input buffer -- anything already on the wire is a
         frame somebody sent us, including a piggybacked AlarmIndication.
+
+        Crucially, the budget is extended while a frame is still arriving.
+        A 50-byte response takes ~52 ms at 9600 baud and lands in several
+        USB reads, so returning on a fixed budget lets the caller send its
+        next poll into the middle of it -- and on a half-duplex RS-485 bus
+        that corrupts both directions. Observed for real: an RR emitted
+        between two chunks of a GetInformation reply, followed by line
+        garbage and a desynchronised link.
         """
-        end = time.monotonic() + budget
+        start = time.monotonic()
+        end = start + budget
+        hard_end = start + max(budget, hard_cap)
         frames = []
+        last_rx = 0.0
         while True:
             waiting = self.ser.in_waiting
             chunk = self.ser.read(waiting if waiting else 1)
+            now = time.monotonic()
             if chunk:
                 self._log("<<", chunk)
                 frames += self._deframer.feed(chunk)
-            if frames or time.monotonic() >= end:
+                last_rx = now
+            if frames:
+                return frames
+            if now >= hard_end:
+                return frames
+            if self._deframer.partial and now - last_rx < idle_gap:
+                continue        # mid-frame: keep listening, do not transmit
+            if now >= end:
                 return frames
 
     def _apply_ack(self, p: PeerState, ctrl: int, sent_ns: int) -> bool:
@@ -365,6 +385,10 @@ class AisgLink:
         ictrl = (p.vs << 1) | (p.vr << 5) | hdlc.PF
         sent_ns = p.vs
         acked = False
+        # Set when the peer's N(R) still asks for the frame we sent, i.e. it
+        # is telling us explicitly that it never arrived. That -- not silence
+        # -- is the only safe trigger to resend.
+        missing = False
         polls = 0
         frame = hdlc.build_frame(addr, ictrl, message)
         self._write(frame)
@@ -379,6 +403,8 @@ class AisgLink:
                     self.stats["foreign"] += 1
                     continue
                 k = hdlc.kind(ctrl)
+                if k != hdlc.U_FRAME and hdlc.nr_of(ctrl) == sent_ns:
+                    missing = True
 
                 if k == hdlc.U_FRAME:
                     u = ctrl & ~hdlc.PF
@@ -437,12 +463,23 @@ class AisgLink:
                     self.stats["unexpected"] += 1
 
             now = time.monotonic()
-            if not acked and now > retx_at and retx_left:
+            if not acked and missing and now > retx_at and retx_left:
                 # The old `retries` loop only ever extended the deadline and
                 # sent more RR polls -- the I-frame itself was never resent,
                 # so a single lost command was unrecoverable.
+                #
+                # But `not acked` is not evidence of loss: this RET answers
+                # some procedures with the response I-frame and no
+                # intervening RR, and if that response is lost we never see
+                # the ack even though the device acted on the command.
+                # Resending then earns a FRMR -- observed for real as
+                # "FRMR 10 30 04", the device's V(R) already advanced past
+                # the frame we were resending. So resend only when its N(R)
+                # explicitly still asks for our frame; silence just keeps
+                # polling until the budget runs out.
                 retx_left -= 1
                 retx_at = now + 1.0
+                missing = False
                 self.stats["retx"] += 1
                 self._write(frame)
                 continue

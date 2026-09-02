@@ -1,0 +1,122 @@
+# aisgd -- AISG RET control API on devkit06sno.
+#
+#   oc apply -f server/deployment.yaml
+#   oc get route aisgd -n aisg -o jsonpath='{.spec.host}{"\n"}'
+#
+# The Deployment replaces the old `aisgctl` sleep-infinity pod: only one pod
+# can hold devic.es/aisg (allocatable is 1), so scale that one to 0 first or
+# this pod stays Pending forever.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aisgd
+  namespace: aisg
+  labels:
+    app: aisgd
+    app.kubernetes.io/name: aisgd
+    app.kubernetes.io/component: ret-control
+    app.kubernetes.io/part-of: aisg
+  annotations:
+    image.openshift.io/triggers: |
+      [{"from":{"kind":"ImageStreamTag","name":"aisgctl:latest"},
+        "fieldPath":"spec.template.spec.containers[0].image"}]
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # the device is exclusive; a RollingUpdate deadlocks
+  selector:
+    matchLabels:
+      app: aisgd
+  template:
+    metadata:
+      labels:
+        app: aisgd
+    spec:
+      nodeSelector:
+        feature.node.kubernetes.io/usb-ff_0403_f448.present: "true"
+      containers:
+      - name: aisgd
+        image: image-registry.openshift-image-registry.svc:5000/aisg/aisgctl:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+        env:
+        - name: AISG_PORT
+          value: /dev/ttyUSB0
+        # duty-cycled: open, check alarms, release. Holding the link open to
+        # watch for alarms (monitor=continuous) means polling forever under
+        # NRM, which never lets the port go for CLI use.
+        - name: AISG_MONITOR
+          value: duty-cycled
+        - name: AISG_MONITOR_PERIOD
+          value: "60"
+        - name: AISG_SYNC_BUDGET
+          value: "8.0"
+        resources:
+          requests:
+            cpu: 50m
+            memory: 96Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi     # 256Mi was sized for sleep-infinity
+            devic.es/aisg: 1
+        readinessProbe:
+          httpGet: {path: /readyz, port: http}
+          initialDelaySeconds: 3
+          periodSeconds: 10
+        livenessProbe:
+          # Asserts the worker thread is iterating, NOT that the bus is
+          # reachable -- an unpowered RET must not restart the pod.
+          httpGet: {path: /healthz, port: http}
+          initialDelaySeconds: 10
+          periodSeconds: 20
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
+      securityContext:
+        supplementalGroups: [18]   # dialout
+      # Above the longest operation (calibrate, 150s) so a move is not
+      # abandoned mid-travel on rollout.
+      terminationGracePeriodSeconds: 180
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aisgd
+  namespace: aisg
+  labels:
+    app: aisgd
+spec:
+  ports:
+  - port: 8080
+    targetPort: http
+    protocol: TCP
+    name: http
+  selector:
+    app: aisgd
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: aisgd
+  namespace: aisg
+  labels:
+    app: aisgd
+  annotations:
+    haproxy.router.openshift.io/websocket-ports: "8080"
+    haproxy.router.openshift.io/timeout: 1h   # default 30s kills /api/v1/events
+spec:
+  to:
+    kind: Service
+    name: aisgd
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

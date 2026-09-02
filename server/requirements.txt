@@ -1,0 +1,6 @@
+# aisgd service dependencies. >= floors, no lockfile, matching the other
+# services in this workspace.
+fastapi>=0.110
+uvicorn>=0.29
+websockets>=12.0        # uvicorn's ws implementation; explicit so wheels resolve
+pyserial>=3.5           # exclusive= (advisory flock) needs 3.5+
