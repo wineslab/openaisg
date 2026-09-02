@@ -6,9 +6,9 @@ a Linux serial port — plus an HTTP/WebSocket service and a web UI, so antenna
 downtilt is a controllable variable in an experiment rather than a Windows GUI
 someone has to click.
 
-The name: AISG is an **open** published standard (3GPP TS 25.462 / 25.466),
-but the tooling around it is vendor Windows software. This is an open
-implementation of the open spec — which is what makes it scriptable.
+**MIT licensed.** The name: AISG is an open published standard (3GPP TS 25.462
+/ 25.466), but the tooling around it is vendor Windows software. This is an
+open implementation of the open spec — which is what makes it scriptable.
 
 Runs against an **Alpha Wireless AW3161-E-F-V2** antenna with a
 **RET21-AS155D** actuator, via an **ATC200-LITE-USB** modem (FTDI,
@@ -116,3 +116,18 @@ few bytes at a time.
 | [docs/deployment.md](docs/deployment.md) | OpenShift, the device plugin, recovery |
 | [docs/hardware.md](docs/hardware.md) | what this specific antenna told us |
 | [docs/validating.md](docs/validating.md) | diffing against ATC Lite under Wine |
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+Every dependency is permissive and compatible (verified from the deployed
+image's package metadata): `fastapi` MIT, `uvicorn` BSD-3-Clause,
+`websockets` BSD-3-Clause, `pyserial` BSD-3-Clause. Nothing third-party is
+vendored into this tree — `deploy/device-plugin.yaml` only *references*
+`ghcr.io/squat/generic-device-plugin` as an image.
+
+The vendor tool (`ATCLite988Setup.exe`) is proprietary and deliberately kept
+**outside** this repository. Nothing here is derived from it: the protocol is
+implemented from the published 3GPP specs, and the sniffer bridge in `utils/`
+only observes the vendor tool's traffic for comparison.
