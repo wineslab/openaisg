@@ -59,6 +59,36 @@ class FakeSerial:
         self.is_open = False
 
 
+def retap_response(code: int, data: bytes = b"", rc: int = 0x00) -> bytes:
+    """A well-formed RETAP response: code | len16 | rc | data."""
+    body = bytes([rc]) + data
+    return bytes([code]) + len(body).to_bytes(2, "little") + body
+
+
+def _lp(s: str) -> bytes:
+    """Length-prefixed ASCII, as GetInformation returns."""
+    return bytes([len(s)]) + s.encode()
+
+
+def default_responses() -> dict:
+    """A plausible RET21-AS155D, matching the real device's answers."""
+    from aisg import retap as _r
+    info = (_lp("RET21-AS155D") + _lp("21707700215001131")
+            + _lp("2.00") + _lp("2.6.6"))
+    return {
+        _r.GET_INFORMATION: retap_response(_r.GET_INFORMATION, info),
+        _r.GET_TILT: retap_response(_r.GET_TILT, (30).to_bytes(2, "little")),
+        _r.SET_TILT: retap_response(_r.SET_TILT),
+        _r.GET_ALARM_STATUS: retap_response(_r.GET_ALARM_STATUS),
+        _r.CLEAR_ACTIVE_ALARMS: retap_response(_r.CLEAR_ACTIVE_ALARMS),
+        _r.ALARM_SUBSCRIBE: retap_response(_r.ALARM_SUBSCRIBE),
+        _r.GET_DEVICE_DATA: retap_response(_r.GET_DEVICE_DATA, b"\x00\x64"),
+        _r.CALIBRATE: retap_response(_r.CALIBRATE),
+        _r.SELF_TEST: retap_response(_r.SELF_TEST),
+        _r.RESET_SOFTWARE: retap_response(_r.RESET_SOFTWARE),
+    }
+
+
 class Secondary:
     """Strict NRM secondary: answers polls, enforces N(S), never speaks first.
 
@@ -72,12 +102,18 @@ class Secondary:
       swallow_first      -- drop the first I-frame entirely (lost to noise)
     """
 
-    def __init__(self, addr=0x01, response=b"\x05\x01\x00\x00",
+    def __init__(self, addr=0x01, response=None, responses=None,
                  rr_before_response=0, indications=(), duplicate_response=False,
                  reject_with=None, swallow_first=False, strict=True,
                  duplicate_indication=False):
         self.addr = addr
+        # `response` answers every procedure with one canned payload (handy
+        # for link-layer tests); `responses` maps procedure code -> payload,
+        # which is what the session layer needs since it asks for identity,
+        # device data, alarms and tilt in sequence.
         self.response = response
+        self.responses = responses if responses is not None else (
+            None if response is not None else default_responses())
         self.rr_before_response = rr_before_response
         self.indications = list(indications)
         self.duplicate_response = duplicate_response
@@ -135,13 +171,22 @@ class Secondary:
                 self.rejected_ns.append(ns)
                 return [self._rr()]
             self.vr = (ns + 1) & 7
-            self.pending = self.response
+            self.pending = self._response_for(payload)
             self._owed_rr = self.rr_before_response
             return self._next()
 
         # Supervisory frame from the primary: a poll.
         self.polls_seen += 1
         return self._next()
+
+    def _response_for(self, request: bytes) -> bytes:
+        if self.responses is not None and request:
+            code = request[0]
+            if code in self.responses:
+                return self.responses[code]
+            # Unknown procedure: what a real device answers.
+            return retap_response(code, rc=0x19)
+        return self.response
 
     def _next(self):
         """What we owe the primary, in priority order.

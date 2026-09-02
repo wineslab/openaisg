@@ -4,6 +4,7 @@ Implements device scan, address assignment, SNRM connection and
 stop-and-wait I-frame exchange (window size 1) per 3GPP TS 25.462.
 """
 
+import errno
 import time
 
 import serial
@@ -13,6 +14,15 @@ from . import hdlc
 
 class AisgError(Exception):
     pass
+
+
+class PortBusy(AisgError):
+    """Another process holds the port's exclusive lock."""
+
+
+class PortLost(AisgError):
+    """The device node exists but the adapter is not answering (USB wedged,
+    unplugged, or re-enumerated). Retrying the open will not help."""
 
 
 class AisgTimeout(AisgError):
@@ -103,8 +113,24 @@ class AisgLink:
         # half-duplex bus. Contention becomes SerialException instead of FCS
         # garbage plus mutual sequence-number destruction. The lock lives on
         # the fd, so close() releases it.
-        self.ser = serial.Serial(port, baud, bytesize=8, parity="N", stopbits=1,
-                                 timeout=0.05, exclusive=exclusive)
+        try:
+            self.ser = serial.Serial(port, baud, bytesize=8, parity="N",
+                                     stopbits=1, timeout=0.05,
+                                     exclusive=exclusive)
+        except serial.SerialException as e:
+            if e.errno in (errno.EWOULDBLOCK, errno.EAGAIN, errno.EACCES):
+                raise PortBusy(
+                    f"{port} is locked by another process (the aisgd service "
+                    f"holds it while its AISG session is up)"
+                ) from e
+            if e.errno in (errno.EIO, errno.EPROTO, errno.ENODEV, errno.ENXIO):
+                # Seen on real hardware: the FTDI wedges at the USB level and
+                # every open fails with "failed to set flow control: -71"
+                # while the device node still exists. A driver rebind or
+                # re-plug is the fix, not a retry.
+                raise PortLost(f"{port} exists but the adapter is not "
+                               f"responding ({e})") from e
+            raise AisgError(f"cannot open {port}: {e}") from e
         if dtr is not None:
             self.ser.dtr = dtr
         self.timeout = timeout
