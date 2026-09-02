@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aisgd — AISG RET control</title>
+<style>
+  /* Roles, not raw hex, so light/dark swap in one place. */
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --plane: #f9f9f7;
+    --ink-1: #0b0b0b;
+    --ink-2: #52514e;
+    --ink-muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --accent: #2a78d6;          /* sequential blue, step 450 */
+    --track: #dfecfd;           /* lighter step of the SAME ramp (blue 100-) */
+    --good: #0ca30c;
+    --warning: #fab219;
+    --serious: #ec835a;
+    --critical: #d03b3b;
+    --success-text: #006300;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --plane: #0d0d0d;
+      --ink-1: #ffffff;
+      --ink-2: #c3c2b7;
+      --ink-muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --accent: #3987e5;
+      --track: #0d366b;         /* darker step of the same ramp (step 700) */
+      --success-text: #0ca30c;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --plane: #0d0d0d;
+    --ink-1: #ffffff;
+    --ink-2: #c3c2b7;
+    --ink-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --accent: #3987e5;
+    --track: #0d366b;         /* darker step of the same ramp (step 700) */
+    --success-text: #0ca30c;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--plane);
+    color: var(--ink-1);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 20px 16px 48px; }
+
+  header {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0; }
+  .host { color: var(--ink-muted); font-size: 12px; }
+  header .spacer { flex: 1; }
+  button, select, input[type=number], input[type=text] {
+    font: inherit; color: var(--ink-1); background: var(--surface-1);
+    border: 1px solid var(--axis); border-radius: 6px; padding: 6px 10px;
+  }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+    font-weight: 600;
+  }
+  button.danger { border-color: var(--critical); color: var(--critical); }
+
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; margin-bottom: 14px;
+  }
+  .card h2 {
+    font-size: 12px; font-weight: 600; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--ink-2); margin: 0 0 12px;
+  }
+
+  /* Hero figure: exactly one per view. */
+  .hero { display: flex; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
+  .hero-val {
+    font-size: 56px; line-height: 1; font-weight: 600; letter-spacing: -.02em;
+  }
+  .hero-val .unit { font-size: 32px; font-weight: 400; color: var(--ink-2); }
+  .hero-label { color: var(--ink-2); font-size: 13px; margin-bottom: 6px; }
+  .hero-target { color: var(--ink-muted); font-size: 12px; }
+
+  /* Meter: fill and track are steps of one ramp, so state reads across it. */
+  .meter { flex: 1; min-width: 260px; }
+  .meter-track {
+    position: relative; height: 14px; background: var(--track);
+    border: 1px solid var(--border); border-radius: 7px; overflow: hidden;
+  }
+  .meter-fill {
+    position: absolute; inset: 0 auto 0 0; background: var(--accent);
+    border-radius: 7px 4px 4px 7px;   /* 4px rounded data-end */
+    transition: width .35s ease;
+  }
+  .meter-scale {
+    display: flex; justify-content: space-between;
+    color: var(--ink-muted); font-size: 11px; margin-top: 5px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tiles {
+    display: grid; gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+  .tile {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 8px; padding: 11px 12px;
+  }
+  .tile .label { color: var(--ink-2); font-size: 12px; margin-bottom: 4px; }
+  .tile .value { font-size: 19px; font-weight: 600; }
+  .tile .sub { color: var(--ink-muted); font-size: 11px; margin-top: 2px; }
+
+  /* Status: always a mark AND a word. Two of the four status colours are
+     sub-3:1 on the light surface by design, so hue never carries meaning
+     on its own here. */
+  .status { display: inline-flex; align-items: center; gap: 6px; }
+  .status .dot {
+    width: 9px; height: 9px; border-radius: 50%; flex: none;
+    box-shadow: 0 0 0 2px var(--surface-1);
+  }
+  .s-good .dot { background: var(--good); }
+  .s-warning .dot { background: var(--warning); }
+  .s-serious .dot { background: var(--serious); }
+  .s-critical .dot { background: var(--critical); }
+  .s-idle .dot { background: var(--axis); }
+  .status .glyph { font-size: 12px; color: var(--ink-2); }
+
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row + .row { margin-top: 12px; }
+  label.inline { color: var(--ink-2); font-size: 13px; }
+  input[type=range] { flex: 1; min-width: 180px; accent-color: var(--accent); }
+  .hint { color: var(--ink-muted); font-size: 12px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 5px 8px 5px 0; }
+  th { color: var(--ink-2); font-weight: 500; white-space: nowrap; }
+  td.num, .tabular { font-variant-numeric: tabular-nums; }
+  tbody tr + tr td { border-top: 1px solid var(--grid); }
+
+  #log {
+    max-height: 300px; overflow-y: auto; font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  #log .line {
+    display: grid; grid-template-columns: 52px 96px 78px 1fr; gap: 10px;
+    padding: 3px 0; border-top: 1px solid var(--grid); align-items: baseline;
+  }
+  #log .line:first-child { border-top: 0; }
+  #log .seq, #log .time { color: var(--ink-muted); white-space: nowrap; }
+  #log .kind { color: var(--ink-2); font-weight: 500; }
+  .muted { color: var(--ink-muted); }
+  details summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
+  pre {
+    background: var(--plane); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px; overflow-x: auto; font-size: 12px;
+    margin: 10px 0 0;
+  }
+  #toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+    background: var(--surface-1); border: 1px solid var(--axis);
+    border-radius: 8px; padding: 10px 14px; max-width: 90vw;
+    box-shadow: 0 4px 16px rgba(0,0,0,.14); display: none;
+  }
+  #toast.err { border-color: var(--critical); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>aisgd</h1>
+  <span class="host" id="host"></span>
+  <span class="spacer"></span>
+  <span class="status s-idle" id="ws-status">
+    <span class="dot"></span><span class="glyph">○</span><span>connecting</span>
+  </span>
+  <button id="theme">Dark</button>
+</header>
+
+<!-- Hero: the one number this view leads with. -->
+<div class="card">
+  <div class="hero">
+    <div>
+      <div class="hero-label">Electrical downtilt</div>
+      <div class="hero-val"><span id="tilt">–</span><span class="unit">°</span></div>
+      <div class="hero-target" id="tilt-target"></div>
+    </div>
+    <div class="meter">
+      <div class="meter-track" id="meter-track" title="tilt within the antenna's range">
+        <div class="meter-fill" id="meter-fill" style="width:0"></div>
+      </div>
+      <div class="meter-scale">
+        <span id="tilt-min">0.0°</span>
+        <span class="muted" id="tilt-mid"></span>
+        <span id="tilt-max">10.0°</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Status</h2>
+  <div class="tiles">
+    <div class="tile">
+      <div class="label">Link</div>
+      <div class="value"><span class="status s-idle" id="t-state">
+        <span class="dot"></span><span class="glyph"></span><span>–</span></span></div>
+      <div class="sub" id="t-state-sub"></div>
+    </div>
+    <div class="tile">
+      <div class="label">Alarms</div>
+      <div class="value"><span class="status s-idle" id="t-alarms">
+        <span class="dot"></span><span class="glyph"></span><span>–</span></span></div>
+      <div class="sub" id="t-alarms-sub"></div>
+    </div>
+    <div class="tile">
+      <div class="label">Monitor</div>
+      <div class="value" id="t-monitor">–</div>
+      <div class="sub" id="t-monitor-sub"></div>
+    </div>
+    <div class="tile">
+      <div class="label">Queue</div>
+      <div class="value tabular" id="t-queue">–</div>
+      <div class="sub" id="t-queue-sub"></div>
+    </div>
+    <div class="tile">
+      <div class="label">Link errors</div>
+      <div class="value tabular" id="t-errors">–</div>
+      <div class="sub">FCS · resets · retx</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Tilt control</h2>
+  <div class="row">
+    <input type="range" id="slider" min="0" max="10" step="0.1" value="0">
+    <input type="number" id="degrees" min="0" max="10" step="0.1" style="width:88px">
+    <span class="hint">°</span>
+    <button class="primary" id="set-tilt">Set tilt</button>
+    <button id="read-tilt">Read from device</button>
+  </div>
+  <div class="row hint" id="tilt-hint"></div>
+</div>
+
+<div class="card">
+  <h2>Alarms &amp; maintenance</h2>
+  <div class="row">
+    <button id="clear-alarms">Clear alarms</button>
+    <span class="hint">|</span>
+    <label class="inline"><input type="checkbox" id="confirm"> I understand these move or reset the hardware</label>
+  </div>
+  <div class="row">
+    <button class="danger" data-guarded="calibrate">Calibrate</button>
+    <button class="danger" data-guarded="self-test">Self test</button>
+    <button class="danger" data-guarded="reset">Reset software</button>
+  </div>
+  <div class="row hint">Calibrate drives the actuator to its end stops and can take ~2 minutes.</div>
+</div>
+
+<div class="card">
+  <h2>Port lease</h2>
+  <div class="row">
+    <label class="inline">Release the port for
+      <input type="number" id="lease-secs" value="300" min="10" max="3600" style="width:80px"> s
+    </label>
+    <button id="take-lease">Take lease</button>
+    <button id="drop-lease">Drop lease</button>
+    <span class="hint" id="lease-state"></span>
+  </div>
+  <div class="row hint">
+    While leased the service holds no link, so <code>aisgctl</code> can use the
+    port; API writes return 503.
+  </div>
+</div>
+
+<div class="card">
+  <h2>Device</h2>
+  <table><tbody id="device"></tbody></table>
+  <details style="margin-top:10px">
+    <summary>Raw device data (GetDeviceData sweep)</summary>
+    <pre id="devdata">–</pre>
+  </details>
+</div>
+
+<div class="card">
+  <h2>Events</h2>
+  <div class="row" style="margin-bottom:8px">
+    <button id="clear-log">Clear</button>
+    <span class="hint" id="log-count"></span>
+  </div>
+  <div id="log"><div class="muted">waiting for events…</div></div>
+</div>
+
+</div>
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const api = (p) => location.origin + p;
+let limits = {min: 0, max: 10};
+let lastStatus = {};
+let logLines = 0;
+let controlTouched = false;   // don't overwrite the operator's input
+
+// --- theme ---------------------------------------------------------------
+const savedTheme = localStorage.getItem("aisgd-theme") || "";
+document.documentElement.dataset.theme = savedTheme;
+const syncThemeButton = () => {
+  const dark = document.documentElement.dataset.theme === "dark" ||
+    (!document.documentElement.dataset.theme &&
+     matchMedia("(prefers-color-scheme: dark)").matches);
+  $("theme").textContent = dark ? "Light" : "Dark";
+};
+$("theme").onclick = () => {
+  const dark = document.documentElement.dataset.theme === "dark" ||
+    (!document.documentElement.dataset.theme &&
+     matchMedia("(prefers-color-scheme: dark)").matches);
+  const next = dark ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem("aisgd-theme", next);
+  syncThemeButton();
+};
+syncThemeButton();
+
+function toast(msg, isError) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = isError ? "err" : "";
+  t.style.display = "block";
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { t.style.display = "none"; }, isError ? 7000 : 3500);
+}
+
+async function call(method, path, body) {
+  const opts = {method, headers: {}};
+  if (body !== undefined) {
+    opts.headers["content-type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(api(path), opts);
+  let data = null;
+  try { data = await res.json(); } catch (e) { /* empty body */ }
+  if (!res.ok) {
+    const detail = (data && (data.detail || data.error)) || res.statusText;
+    throw new Error(`${res.status} ${detail}`);
+  }
+  return {status: res.status, data};
+}
+
+// --- status rendering ----------------------------------------------------
+
+// state -> status role. Two of the four status colours are sub-3:1 on the
+// light surface by design, so every one of these also ships a glyph and the
+// state word: hue never carries the meaning alone.
+const STATE_ROLE = {
+  connected:   ["good", "●"],
+  closed:      ["idle", "○"],
+  leased:      ["warning", "▲"],
+  opening:     ["warning", "▲"],
+  discovering: ["warning", "▲"],
+  connecting:  ["warning", "▲"],
+  draining:    ["warning", "▲"],
+  releasing:   ["idle", "○"],
+  backoff:     ["serious", "▲"],
+  no_devices:  ["critical", "■"],
+  port_busy:   ["serious", "▲"],
+  port_lost:   ["critical", "■"],
+  shutdown:    ["critical", "■"],
+};
+
+function setStatus(el, role, glyph, text) {
+  el.className = "status s-" + role;
+  el.children[1].textContent = glyph;
+  el.children[2].textContent = text;
+}
+
+function render(s) {
+  lastStatus = s;
+  if (s.tilt_limits) limits = s.tilt_limits;
+
+  const tilt = (s.tilt === null || s.tilt === undefined) ? null : s.tilt;
+  $("tilt").textContent = tilt === null ? "–" : tilt.toFixed(1);
+  $("tilt-target").textContent =
+    (s.target_tilt !== null && s.target_tilt !== undefined && s.target_tilt !== tilt)
+      ? `target ${Number(s.target_tilt).toFixed(1)}°` : "";
+
+  const span = Math.max(0.1, limits.max - limits.min);
+  const pct = tilt === null ? 0 :
+    Math.max(0, Math.min(100, ((tilt - limits.min) / span) * 100));
+  $("meter-fill").style.width = pct + "%";
+  $("meter-track").title = tilt === null ? "tilt unknown"
+    : `${tilt.toFixed(1)}° of ${limits.min.toFixed(1)}–${limits.max.toFixed(1)}°`;
+  $("tilt-min").textContent = limits.min.toFixed(1) + "°";
+  $("tilt-max").textContent = limits.max.toFixed(1) + "°";
+  $("tilt-mid").textContent = ((limits.min + limits.max) / 2).toFixed(1) + "°";
+
+  const [role, glyph] = STATE_ROLE[s.state] || ["idle", "○"];
+  setStatus($("t-state"), role, glyph, s.state || "–");
+  $("t-state-sub").textContent = s.last_error
+    ? s.last_error.slice(0, 90)
+    : (s.address !== null && s.address !== undefined ? `HDLC address ${s.address}` : "");
+
+  const alarms = s.alarms || [];
+  if (alarms.length) {
+    setStatus($("t-alarms"), "critical", "■", `${alarms.length} active`);
+    $("t-alarms-sub").textContent = alarms.join(", ");
+  } else {
+    setStatus($("t-alarms"), "good", "●", "none active");
+    $("t-alarms-sub").textContent = "";
+  }
+
+  $("t-monitor").textContent = s.monitor || "–";
+  $("t-monitor-sub").textContent = s.alarm_mode ? `alarms: ${s.alarm_mode}` : "";
+  $("t-queue").textContent = s.queue_depth ?? "–";
+  $("t-queue-sub").textContent = s.port_pinned ? "port pinned" : "port shared";
+
+  const st = s.stats || {};
+  $("t-errors").textContent =
+    `${s.fcs_errors ?? 0} · ${st.link_resets ?? 0} · ${st.retx ?? 0}`;
+
+  $("lease-state").textContent = s.leased_for
+    ? `leased, ${Math.round(s.leased_for)}s left` : "not leased";
+
+  const hint = $("tilt-hint");
+  hint.textContent = `Range ${limits.min.toFixed(1)}–${limits.max.toFixed(1)}° ` +
+    `in 0.1° steps, read from the antenna's own device data.`;
+  for (const el of [$("slider"), $("degrees")]) {
+    el.min = limits.min; el.max = limits.max;
+  }
+  // Seed the control with where the antenna actually is, so "Set tilt" never
+  // starts from a blank box or a slider parked at 0 while the device is at 3.
+  // Only until the operator touches it -- never yank a control mid-edit.
+  if (!controlTouched && tilt !== null) {
+    $("slider").value = tilt;
+    $("degrees").value = tilt.toFixed(1);
+  }
+}
+
+async function refresh() {
+  try {
+    const {data} = await call("GET", "/api/v1/status");
+    render(data);
+  } catch (e) { /* transient; the WS keeps us live */ }
+}
+
+async function loadDevice() {
+  try {
+    const {data} = await call("GET", "/api/v1/device");
+    if (data.tilt_limits) limits = data.tilt_limits;
+    const rows = Object.entries(data.identity || {})
+      .map(([k, v]) => `<tr><th>${k.replace(/_/g, " ")}</th><td>${v}</td></tr>`);
+    if (data.address !== null && data.address !== undefined)
+      rows.push(`<tr><th>hdlc address</th><td class="num">${data.address}</td></tr>`);
+    if (data.tilt_limits)
+      rows.push(`<tr><th>tilt range</th><td class="num">` +
+        `${data.tilt_limits.min}–${data.tilt_limits.max}° ` +
+        `(${data.tilt_limits.step}° steps)</td></tr>`);
+    $("device").innerHTML = rows.join("") ||
+      `<tr><td class="muted">not read yet — the service reads identity on connect</td></tr>`;
+    $("devdata").textContent = Object.keys(data.device_data || {}).length
+      ? Object.entries(data.device_data).map(([k, v]) => `${k}  ${v}`).join("\n")
+      : "–";
+  } catch (e) { toast("device: " + e.message, true); }
+}
+
+// --- events --------------------------------------------------------------
+function logEvent(ev) {
+  const box = $("log");
+  if (!logLines) box.innerHTML = "";
+  const t = ev.ts ? new Date(ev.ts * 1000).toLocaleTimeString() : "";
+  let detail = "";
+  if (ev.type === "link") detail = ev.state + (ev.error ? ` — ${ev.error}` : "");
+  else if (ev.type === "alarm") detail = `${ev.action}: ${ev.name}`;
+  else if (ev.type === "status" || ev.type === "snapshot")
+    detail = `state=${ev.state} tilt=${ev.tilt ?? "–"}`;
+  else if (ev.type === "progress")
+    detail = `${ev.command} polls=${ev.polls} ${ev.elapsed}s` +
+             (ev.acked ? " acked" : "");
+  else if (ev.type === "job")
+    detail = `${ev.command} ${ev.state}` + (ev.error ? ` — ${ev.error}` : "");
+  else if (ev.type === "resync") detail = `dropped ${ev.dropped} events`;
+  else detail = JSON.stringify(ev);
+
+  const line = document.createElement("div");
+  line.className = "line";
+  line.innerHTML =
+    `<span class="seq">${ev.seq ?? ""}</span>` +
+    `<span class="time">${t}</span>` +
+    `<span class="kind">${ev.type}</span>` +
+    `<span>${detail.replace(/</g, "&lt;")}</span>`;
+  box.prepend(line);
+  logLines++;
+  while (box.children.length > 250) box.lastChild.remove();
+  $("log-count").textContent = `${logLines} events`;
+}
+
+let ws, wsRetry = 1000;
+function connectWS() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/api/v1/events`);
+  ws.onopen = () => {
+    wsRetry = 1000;
+    setStatus($("ws-status"), "good", "●", "live");
+  };
+  ws.onmessage = (m) => {
+    const ev = JSON.parse(m.data);
+    if (ev.type === "snapshot" || ev.type === "status") render(ev);
+    if (ev.type === "alarm" || ev.type === "job") refresh();
+    logEvent(ev);
+  };
+  ws.onclose = () => {
+    setStatus($("ws-status"), "serious", "▲", "reconnecting");
+    setTimeout(connectWS, wsRetry);
+    wsRetry = Math.min(wsRetry * 2, 15000);
+  };
+  ws.onerror = () => { /* onclose follows */ };
+}
+
+// --- job polling ---------------------------------------------------------
+async function follow(job, what) {
+  toast(`${what} accepted as job ${job.id}; running…`);
+  for (let i = 0; i < 120; i++) {
+    await new Promise((r) => setTimeout(r, 1500));
+    try {
+      const {data} = await call("GET", `/api/v1/jobs/${job.id}`);
+      if (data.state === "done") {
+        toast(`${what} done in ${data.duration ?? "?"}s`);
+        refresh(); return;
+      }
+      if (data.state === "failed") {
+        toast(`${what} failed: ${data.error}`, true);
+        refresh(); return;
+      }
+    } catch (e) { /* keep polling */ }
+  }
+  toast(`${what}: still running, see the event log`);
+}
+
+async function submit(what, method, path, body, btn) {
+  btn && (btn.disabled = true);
+  try {
+    const {status, data} = await call(method, path, body);
+    if (status === 202 && data && data.id) await follow(data, what);
+    else { toast(`${what} ok`); refresh(); }
+  } catch (e) {
+    toast(`${what}: ${e.message}`, true);
+  } finally {
+    btn && (btn.disabled = false);
+  }
+}
+
+// --- wiring --------------------------------------------------------------
+$("slider").oninput = (e) => {
+  controlTouched = true; $("degrees").value = e.target.value;
+};
+$("degrees").oninput = (e) => {
+  controlTouched = true; $("slider").value = e.target.value;
+};
+
+$("set-tilt").onclick = (e) => {
+  const deg = parseFloat($("degrees").value);
+  if (Number.isNaN(deg)) return toast("enter a tilt in degrees", true);
+  if (deg < limits.min || deg > limits.max)
+    return toast(`tilt must be ${limits.min}–${limits.max}°`, true);
+  submit(`set tilt ${deg.toFixed(1)}°`, "PUT", "/api/v1/tilt", {degrees: deg}, e.target);
+};
+$("read-tilt").onclick = (e) =>
+  submit("read tilt", "GET", "/api/v1/status?refresh=true", undefined, e.target);
+$("clear-alarms").onclick = (e) =>
+  submit("clear alarms", "POST", "/api/v1/alarms/clear", {}, e.target);
+
+for (const btn of document.querySelectorAll("[data-guarded]")) {
+  btn.onclick = () => {
+    const what = btn.dataset.guarded;
+    if (!$("confirm").checked)
+      return toast("tick the confirm box first — this moves or resets hardware", true);
+    if (!window.confirm(`Run ${what} on the RET now?`)) return;
+    submit(what, "POST", `/api/v1/${what}`, {confirm: true}, btn);
+  };
+}
+
+$("take-lease").onclick = (e) =>
+  submit("take lease", "POST", "/api/v1/lease",
+         {seconds: parseFloat($("lease-secs").value) || 300}, e.target);
+$("drop-lease").onclick = (e) =>
+  submit("drop lease", "DELETE", "/api/v1/lease", undefined, e.target);
+$("clear-log").onclick = () => {
+  $("log").innerHTML = `<div class="muted">cleared</div>`;
+  logLines = 0; $("log-count").textContent = "";
+};
+
+$("host").textContent = location.host;
+refresh();
+loadDevice();
+connectWS();
+setInterval(refresh, 4000);      // cheap: served from the worker's cache
+setInterval(loadDevice, 60000);
+</script>
+</body>
+</html>

@@ -37,7 +37,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import uvicorn
 
@@ -451,6 +452,21 @@ async def events(ws: WebSocket, since: int = 0):
         logger.exception("websocket")
     finally:
         bus.unsubscribe(sub)
+
+
+# ---- test UI ----
+#
+# Mounted last so it cannot shadow an API path. Same origin as the API, so
+# no CORS and the WebSocket URL is derived from location.host.
+
+_STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+if os.path.isdir(_STATIC):
+    app.mount("/ui", StaticFiles(directory=_STATIC, html=True), name="ui")
+
+    @app.get("/", include_in_schema=False)
+    async def root():
+        return FileResponse(os.path.join(_STATIC, "index.html"))
 
 
 def _parse_args(argv=None):
