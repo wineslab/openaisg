@@ -77,6 +77,9 @@ def parse_frames(raw: bytes):
 
     Raises FrameError on an FCS mismatch (useful as a bus-collision signal
     during device scans), after yielding any earlier valid frames.
+
+    One-shot: the whole stream must be present. For a long-lived session use
+    Deframer, which resynchronises instead of raising.
     """
     for chunk in raw.split(bytes([FLAG])):
         if not chunk:
@@ -87,6 +90,95 @@ def parse_frames(raw: bytes):
         if fcs16(body[:-2]) != body[-2] | (body[-1] << 8):
             raise FrameError(f"bad FCS in frame: {body.hex(' ')}")
         yield body[0], body[1], body[2:-2]
+
+
+class Deframer:
+    """Incremental HDLC deframer for a continuously read stream.
+
+    parse_frames() is fine for one exchange but wrong for a session: it needs
+    the entire stream at once, and it raises on the first bad FCS, which
+    discards every good frame in the same buffer. Here a corrupt frame is
+    counted and skipped, and a partial tail is kept for the next feed() --
+    so noise costs one frame instead of the exchange.
+    """
+
+    def __init__(self, max_frame: int = 512):
+        self._buf = bytearray()
+        self._max = max_frame
+        self.fcs_errors = 0
+        self.overruns = 0
+
+    def feed(self, data: bytes) -> list:
+        """Consume bytes, return [(addr, ctrl, payload), ...] for whole frames."""
+        self._buf += data
+        out = []
+        while True:
+            i = self._buf.find(FLAG)
+            if i < 0:
+                # No flag at all: nothing framed yet. Cap the buffer so line
+                # noise on an idle bus cannot grow it without bound.
+                if len(self._buf) > self._max:
+                    del self._buf[:-1]
+                    self.overruns += 1
+                return out
+            j = self._buf.find(FLAG, i + 1)
+            if j < 0:
+                del self._buf[:i]  # drop leading junk, keep the partial frame
+                if len(self._buf) > self._max:
+                    del self._buf[:1]
+                    self.overruns += 1
+                return out
+            chunk = bytes(self._buf[i + 1:j])
+            # Leave the closing flag in place: back-to-back frames may share it.
+            del self._buf[:j]
+            if not chunk:
+                # Two adjacent flags: the del above already consumed the
+                # first one, and the second opens the next frame. Deleting
+                # again here would eat it.
+                continue
+            body = unstuff(chunk)
+            if len(body) < 4:
+                continue
+            if fcs16(body[:-2]) == body[-2] | (body[-1] << 8):
+                out.append((body[0], body[1], body[2:-2]))
+            else:
+                self.fcs_errors += 1
+
+
+# --- control-field classification ---
+#
+# The old inline tests (`ctrl & 1 == 0` for I, `ctrl & 0x0F == 0x01` for RR)
+# silently ignore every other frame type: FRMR (0x87) and DM (0x0F) match
+# neither test and used to fall through to a timeout, and RNR/REJ were read
+# as unknown. A long-lived link has to act on all of them.
+
+I_FRAME = "I"
+RR = "RR"
+RNR = "RNR"
+REJ = "REJ"
+SREJ = "SREJ"
+U_FRAME = "U"
+
+_S_TYPES = {0: RR, 1: RNR, 2: REJ, 3: SREJ}
+
+
+def kind(ctrl: int) -> str:
+    """Classify a control byte as an I-, S- or U-frame."""
+    if not ctrl & 0x01:
+        return I_FRAME
+    if ctrl & 0x03 == 0x01:
+        return _S_TYPES[(ctrl >> 2) & 0x03]
+    return U_FRAME
+
+
+def ns_of(ctrl: int) -> int:
+    """Send sequence number N(S) of an I-frame."""
+    return (ctrl >> 1) & 7
+
+
+def nr_of(ctrl: int) -> int:
+    """Receive sequence number N(R) of an I- or S-frame."""
+    return (ctrl >> 5) & 7
 
 
 # --- XID parameter encoding (FI=0x81, GI=0xF0 user-defined set) ---
