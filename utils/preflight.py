@@ -11,7 +11,7 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 port = sys.argv[1] if len(sys.argv) > 1 else "/dev/ttyUSB0"
 

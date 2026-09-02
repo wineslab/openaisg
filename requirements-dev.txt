@@ -1,0 +1,3 @@
+# Test-only dependencies. The suite needs no hardware: tests/fake_secondary.py
+# stands in for the RET.
+pytest>=8.0

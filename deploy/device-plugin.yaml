@@ -1,0 +1,111 @@
+# generic-device-plugin -- makes /dev/ttyUSB0 a schedulable resource so the
+# service pod can reach it WITHOUT being privileged.
+#
+#   oc apply -f deploy/device-plugin.yaml
+#   oc adm policy add-scc-to-user privileged -z generic-device-plugin -n aisg
+#   oc label ns aisg security.openshift.io/scc.podSecurityLabelSync=false \
+#       pod-security.kubernetes.io/enforce=privileged --overwrite
+#   oc get node <node> -o jsonpath='{.status.allocatable.devic\.es/aisg}'
+#
+# Three separate things gate a USB device in a container, and only the third
+# is commonly missed:
+#   scheduling  -> nodeSelector on the NFD label below
+#   visibility  -> hostPath, or a device plugin
+#   DEVICE CGROUP PERMISSION -> privileged: true, or a device plugin
+# A hostPath mount of /dev/ttyUSB0 into an unprivileged pod yields a device
+# node that returns EPERM: capabilities do not help, it is a cgroup allowlist.
+# Only privileged or the kubelet Device Plugin API writes to that list.
+#
+# The plugin also sidesteps SELinux -- it makes runc mknod the node inside the
+# container's private /dev, so it carries the pod's own MCS label instead of
+# the host's tty_device_t.
+#
+# NOTE: the resource domain is `devic.es`, NOT the `squat.ai` in the upstream
+# README. A pod requesting the wrong domain stays Pending forever.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aisg
+  labels:
+    security.openshift.io/scc.podSecurityLabelSync: "false"
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: privileged
+    pod-security.kubernetes.io/audit: privileged
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: generic-device-plugin
+  namespace: aisg
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app.kubernetes.io/name: generic-device-plugin
+  name: generic-device-plugin
+  namespace: aisg
+spec:
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: generic-device-plugin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: generic-device-plugin
+    spec:
+      containers:
+      - args:
+        - --device
+        - "name: aisg\ngroups:\n  - paths:\n      - path: /dev/ttyUSB0\n"
+        image: ghcr.io/squat/generic-device-plugin:latest
+        imagePullPolicy: Always
+        name: generic-device-plugin
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 100m
+            memory: 50Mi
+          requests:
+            cpu: 50m
+            memory: 20Mi
+        securityContext:
+          privileged: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/kubelet/device-plugins
+          name: device-plugin
+        - mountPath: /dev
+          name: dev
+      dnsPolicy: ClusterFirst
+      nodeSelector:
+        feature.node.kubernetes.io/usb-ff_0403_f448.present: 'true'
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: generic-device-plugin
+      serviceAccountName: generic-device-plugin
+      terminationGracePeriodSeconds: 30
+      tolerations:
+      - operator: Exists
+      volumes:
+      - hostPath:
+          path: /var/lib/kubelet/device-plugins
+          type: ''
+        name: device-plugin
+      - hostPath:
+          path: /dev
+          type: ''
+        name: dev
+  updateStrategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate
+

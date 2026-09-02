@@ -1,6 +1,6 @@
 # aisgd -- AISG RET control API on devkit06sno.
 #
-#   oc apply -f server/deployment.yaml
+#   oc apply -f deploy/aisgd.yaml
 #   oc get route aisgd -n aisg -o jsonpath='{.spec.host}{"\n"}'
 #
 # The Deployment replaces the old `aisgctl` sleep-infinity pod: only one pod

@@ -31,25 +31,27 @@ import asyncio
 import logging
 import os
 import time
-import uuid
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (FastAPI, HTTPException, Query, WebSocket,
+                     WebSocketDisconnect)
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import uvicorn
 
 import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
 
 from aisg.link import AisgError, AisgTimeout, LinkReset, PortBusy, PortLost
 from aisg.session import (COMMAND_TIMEOUTS, DEFAULT_COMMAND_TIMEOUT,
                           MonitorMode, PRIORITY_CONTROL, PRIORITY_USER,
                           SerialWorker, SessionError, WRITE_COMMANDS)
-from server.state import EventBus, WorkerBridge
+from api.events import EventBus, WorkerBridge
+from api.jobs import Job, JobStore
 
 logging.basicConfig(
     level=logging.DEBUG if os.environ.get("AISG_DEBUG") == "1" else logging.INFO,
@@ -70,62 +72,6 @@ DEBUG = os.environ.get("AISG_DEBUG") == "1"
 
 # WebSocket close codes, so a client can tell why it was refused.
 CLOSE_BAD_SINCE = 4000
-
-
-# --- job store -------------------------------------------------------------
-
-@dataclass
-class Job:
-    id: str
-    command: str
-    args: dict
-    state: str = "running"          # running | done | failed
-    result: Any = None
-    error: str | None = None
-    started_at: float = field(default_factory=time.time)
-    finished_at: float | None = None
-
-    def as_dict(self) -> dict:
-        d = {
-            "id": self.id, "command": self.command, "args": self.args,
-            "state": self.state, "started_at": round(self.started_at, 3),
-        }
-        if self.result is not None:
-            d["result"] = self.result
-        if self.error:
-            d["error"] = self.error
-        if self.finished_at:
-            d["finished_at"] = round(self.finished_at, 3)
-            d["duration"] = round(self.finished_at - self.started_at, 2)
-        return d
-
-
-class JobStore:
-    """Outlives the HTTP request that created it.
-
-    A tilt move cannot be aborted once the device has acked it, so a client
-    disconnecting must not lose the outcome -- and DELETE on a running job
-    would be a lie. Jobs are therefore detachable, not cancellable.
-    """
-
-    def __init__(self, limit: int = 200):
-        self._jobs: dict[str, Job] = {}
-        self._order: list[str] = []
-        self._limit = limit
-
-    def create(self, command: str, args: dict) -> Job:
-        job = Job(id=uuid.uuid4().hex[:12], command=command, args=args)
-        self._jobs[job.id] = job
-        self._order.append(job.id)
-        while len(self._order) > self._limit:
-            self._jobs.pop(self._order.pop(0), None)
-        return job
-
-    def get(self, job_id: str) -> Job | None:
-        return self._jobs.get(job_id)
-
-    def list(self) -> list[dict]:
-        return [self._jobs[i].as_dict() for i in reversed(self._order)]
 
 
 # --- app -------------------------------------------------------------------
@@ -459,14 +405,14 @@ async def events(ws: WebSocket, since: int = 0):
 # Mounted last so it cannot shadow an API path. Same origin as the API, so
 # no CORS and the WebSocket URL is derived from location.host.
 
-_STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+_UI = os.path.join(_ROOT, "ui")
 
-if os.path.isdir(_STATIC):
-    app.mount("/ui", StaticFiles(directory=_STATIC, html=True), name="ui")
+if os.path.isdir(_UI):
+    app.mount("/ui", StaticFiles(directory=_UI, html=True), name="ui")
 
     @app.get("/", include_in_schema=False)
     async def root():
-        return FileResponse(os.path.join(_STATIC, "index.html"))
+        return FileResponse(os.path.join(_UI, "index.html"))
 
 
 def _parse_args(argv=None):

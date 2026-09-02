@@ -14,9 +14,11 @@ Examples:
 """
 
 import argparse
+import os
 import sys
 
-sys.path.insert(0, __file__.rsplit("/", 1)[0])
+# The package lives one level up now that the CLI sits in cli/.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from aisg import AisgLink, AisgError, Ret
 
